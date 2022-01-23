@@ -1,0 +1,7 @@
+$6000-$7FFF SRAM区域,通俗点就是存档区域
+$8000-$FFFF 程序运行区域
+
+$FFFA-$FFFB  NMI中断表
+$FFFC-$FFFD  重启机器时,PC的地址
+$FFFE-$FFFF  IRQ/BRK 中断表
+
