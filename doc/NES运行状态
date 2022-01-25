@@ -5,3 +5,8 @@ $FFFA-$FFFB  NMI中断表
 $FFFC-$FFFD  重启机器时,PC的地址
 $FFFE-$FFFF  IRQ/BRK 中断表
 
+NMI 由PPU在vblank时生成
+IRQ 由APU和外部硬件生成
+内部存储有
+    2K WRAM,2K VRAM,256B SPR-RAM,和调色板/寄存器
+
