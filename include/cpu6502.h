@@ -212,11 +212,11 @@ dec abs,x
     CASE(h4){ u16 addr = INSN_DAT16(1)+X; u8* ptr = RMEM_PTR(addr); tmp = *ptr opr 1;MEM_WRITE(addr,tmp); tmp&=0xff;/*不更新cflag?*/  ;NEXT_OPR; }BREAK;
 
 #define DEF_BASE3(name,opr,NEXT_OPR,h1,h2,h3,h4,h5) \
-    CASE(h1){ u8* ptr = &ZERO_PAGE(INSN_DAT8(1)+0); int b0 = *ptr &1; tmp = opr(*ptr); *ptr = tmp;  ;NEXT_OPR; }BREAK; \
-    CASE(h2){ u8* ptr = &ZERO_PAGE(INSN_DAT8(1)+X); int b0 = *ptr &1; tmp = opr(*ptr); *ptr = tmp;  ;NEXT_OPR; }BREAK; \
-    CASE(h3){ u16 addr = INSN_DAT16(1)+0; u8* ptr = RMEM_PTR(addr);int b0 = *ptr &1;    tmp = opr(*ptr); MEM_WRITE(addr,tmp);  ;NEXT_OPR; }BREAK; \
-    CASE(h4){ u16 addr = INSN_DAT16(1)+X; u8* ptr = RMEM_PTR(addr);int b0 = *ptr &1;    tmp = opr(*ptr); MEM_WRITE(addr,tmp);  ;NEXT_OPR; }BREAK; \
-    CASE(h5){ int b0 = A&1;A = opr(A);tmp = A;NEXT_OPR; }BREAK;
+    CASE(h1){ u8* ptr = &ZERO_PAGE(INSN_DAT8(1)+0); int b0 = *ptr &1; tmp = opr(*ptr); *ptr = tmp;                              ;NEXT_OPR; }BREAK; \
+    CASE(h2){ u8* ptr = &ZERO_PAGE(INSN_DAT8(1)+X); int b0 = *ptr &1; tmp = opr(*ptr); *ptr = tmp;                              ;NEXT_OPR; }BREAK; \
+    CASE(h3){ u16 addr = INSN_DAT16(1)+0; u8* ptr = RMEM_PTR(addr);int b0 = *ptr &1;    tmp = opr(*ptr); MEM_WRITE(addr,tmp);   ;NEXT_OPR; }BREAK; \
+    CASE(h4){ u16 addr = INSN_DAT16(1)+X; u8* ptr = RMEM_PTR(addr);int b0 = *ptr &1;    tmp = opr(*ptr); MEM_WRITE(addr,tmp);   ;NEXT_OPR; }BREAK; \
+    CASE(h5){ int b0 = A&1;tmp = opr(A);A = tmp&0xff;NEXT_OPR; }BREAK;
 
 #define ASL_OPR(AA) \
     (AA<<1)
@@ -228,7 +228,7 @@ dec abs,x
     ((AA<<1)|(P&N6502_CLG))
 
 #define ROR_OPR(AA) \
-    ((AA<<1)|((P&N6502_CLG)<<7))
+    ((AA>>1)|((P&N6502_CLG)<<7))
 
 #define LSR_OPR_NEXT \
     tmp |= (b0<<8); \
@@ -614,6 +614,12 @@ INLINE int exnes_exec(exnes_t*nes){
             u8 insn_len    = insn_info[(*cpu->cur_insn<<1)+0];
             state += insn_cycles;
 
+            #ifdef _DEBUG_
+            nes->oldPc[nes->oldPc_set&(_OLDPC_LOG_MAX_-1)] = PC;
+            nes->oldPc_set++;
+            nes->oldPc_set&=_OLDPC_LOG_MAX_-1;
+            #endif
+
             switch (opcode)
             {
                 DEF_BASE_E1(adc,A,  0xff,_adc_,0x69,0x65,0x75,0x6d,0x7d,0x79,0x61,0x71,UPDATE_FLAGE_ZNCV)
@@ -915,7 +921,7 @@ INLINE int exnes_exec(exnes_t*nes){
                 nes->oam_addr = value;
             }
             else if(addr==0x4014
-                &&nes->scanline>240
+                &&nes->scanline>=240
                 ){
                 //OAMDMA
                 //传送到内部OAM
@@ -925,9 +931,10 @@ INLINE int exnes_exec(exnes_t*nes){
                 int  dest_addr = nes->oam_addr;
 
                 src_addr = 0;   /*已经不用了*/
-                for(;dest_addr<0x100;dest_addr++){
+                while(dest_addr<0x100){
                     dest[dest_addr] = dat[src_addr];
                     src_addr++;
+                    dest_addr++;
                 }
                 state += 513;   /*和514,主要是看当前时钟是偶数还是奇数*/
             }
@@ -950,8 +957,9 @@ INLINE int exnes_exec(exnes_t*nes){
                 /*没有绘制的像素*/
                 EXNES_ERRORF(nes,"no draw pixels!\n");
             }
-
-            exnes_ppu_render(nes,pixel,nes->scanline);
+            if(nes->scanline<240){
+                exnes_ppu_render(nes,pixel,nes->scanline);
+            }
             if(nes->process_other){
                 nes->process_other(nes);
             }

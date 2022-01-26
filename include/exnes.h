@@ -115,6 +115,11 @@ CPU时钟溢出
     u8 ppu[0x10];
     u8 rppu[0x10];              //读取ppu
     u8 apu[0x20];               //0x4000
+#ifdef _DEBUG_
+#define _OLDPC_LOG_MAX_ 0x20
+    u16 oldPc[_OLDPC_LOG_MAX_];
+    u16 oldPc_set;
+#endif
 #define PPU_MEM_PTR(OFF) \
     (nes->ppu_mmap[(OFF)>>0xc]+((OFF)&0xfff))
     u8 *ppu_mmap[0x10];         //PPU的内存
