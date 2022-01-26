@@ -67,6 +67,18 @@ static int process_other(exnes_t*nes){
     if(win.event.type==SDL_QUIT){
         exit(0);
     }
+    const u8 *key = SDL_GetKeyboardState(0);
+    u8 *P1 = &nes->input[0];
+    *P1 = 0;
+    *P1 |= key[SDL_SCANCODE_DOWN  ]?exnes_input_Down :0;
+    *P1 |= key[SDL_SCANCODE_UP    ]?exnes_input_Up   :0;
+    *P1 |= key[SDL_SCANCODE_RIGHT ]?exnes_input_Right:0;
+    *P1 |= key[SDL_SCANCODE_LEFT  ]?exnes_input_Left :0;
+    *P1 |= key[SDL_SCANCODE_RETURN]?exnes_input_start:0;
+    *P1 |= key[SDL_SCANCODE_Z     ]?exnes_input_A    :0;
+    *P1 |= key[SDL_SCANCODE_X     ]?exnes_input_B    :0;
+    *P1 |= key[SDL_SCANCODE_SPACE ]?exnes_input_select:0;
+
     return 0;
 }
 

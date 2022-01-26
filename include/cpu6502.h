@@ -44,6 +44,18 @@ INLINE u8* _rmem_ptr(exnes_t*cpu,int addr,u32 *state,u32 *read_dat){
          cpu->ppu_write_addr++;
          return ptr;
      }
+     else if(addr>=0x4016&&addr<=0x4019){
+         u8 *iptr = &cpu->input[sizeof(cpu->input)-1];
+         if(cpu->input_state){
+            *iptr = (cpu->input[addr-0x4016]>>(cpu->input_state-1))&1;
+            cpu->input_state &= 0x7;        /*如果当前值是8,则变为0,+=1则为1*/
+            cpu->input_state += 1;
+         }
+         else{
+             *iptr = 0;
+         }
+         return iptr;
+     }
      return _RMEM_PTR(addr);
 }
 #define RMEM_PTR(OFF) \
@@ -940,6 +952,16 @@ INLINE int exnes_exec(exnes_t*nes){
             }
             else if(addr>=0x2000&&addr<0x2010){
                 nes->ppu[addr&0xf] = value;
+            }
+            else if(addr==0x4016){
+                /*输入时只能写这个寄存器*/
+                if((value&1)==1){
+                    nes->input_state = 1;
+                }
+                else{
+                    /*重置位置?*/
+                    nes->input_state = 1;
+                }
             }
         }
         if(state&CPU_STATE_CYCLES){

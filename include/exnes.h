@@ -83,6 +83,17 @@ enum{
     video_mode_pal,
 };
 
+enum{
+    exnes_input_A =      1<<0,
+    exnes_input_B =      1<<1,
+    exnes_input_select = 1<<2,
+    exnes_input_start  = 1<<3,
+    exnes_input_Up     = 1<<4,
+    exnes_input_Down   = 1<<5,
+    exnes_input_Left   = 1<<6,
+    exnes_input_Right  = 1<<7,
+};
+
 struct exnes_t;
 typedef struct exnes_t{
     u8 A,X,Y;
@@ -157,6 +168,11 @@ CPU时钟溢出
     int scanline;   //扫描线
 
     u16 tileTable[0x100];
+
+    /*读取寄存器状态*/
+    /*input[0xf]为内存返回值*/
+    u8 input[0x10];
+    u8 input_state;
 
     //模拟器状态
 #define EXNES_QUIT      (1<<0)
