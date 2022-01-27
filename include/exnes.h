@@ -153,6 +153,8 @@ CPU时钟溢出
 
     /*调色板颜色*/
     u16 pal[0x40];
+    u8 pal_isbigendian;
+    u8 oldpal_isbigendian;
 
     i32 PPUSCROLL_state;
     i32 PPUSCROLL[2];
@@ -257,6 +259,17 @@ static const u16 nes_pal[] = {
 0x777,0x567,0x657,0x757,0x747,0x755,0x764,0x772,0x773,0x572,0x473,0x276,0x467,0x000,0x000,0x000,
 
 };
+
+/*调色板位移多少*/
+#ifndef EXNES_PAL_R_SHIFT
+#define EXNES_PAL_R_SHIFT 0
+#endif
+#ifndef EXNES_PAL_G_SHIFT
+#define EXNES_PAL_G_SHIFT 5
+#endif
+#ifndef EXNES_PAL_B_SHIFT
+#define EXNES_PAL_B_SHIFT 10
+#endif
 
 INLINE void exnes_ppu_render(exnes_t*nes,uint16_t *line_pixel,int line);
 INLINE void exnes_video_setmode(exnes_t*nes,int ispal);

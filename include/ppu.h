@@ -84,7 +84,7 @@ INLINE void exnes_ppu_render_name_table(exnes_t*nes,uint16_t *line_pixel,int lin
     u16 *pixel_ptr = pixel_buf;
     if(xoff==0)pixel_ptr = line_pixel;
     memset(pixel_buf,0,sizeof(pixel_buf));
-    for(;draw_x<draw_width;draw_x){
+    for(;draw_x<draw_width;){
         u8 pal = _get_map_att(nes,x,y);
         u8 *curpal = bg_pal + pal * 4;
         int xx;

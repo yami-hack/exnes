@@ -599,7 +599,7 @@ INLINE i32 _cmp_(exnes_t*nes,u8 a,u8 b,u32 p){
     CASE(h7){ /*(d, x)*/u8 a=A; u8 b=*(u8*)RMEM_PTR((*(u16*)ZERO_PAGE_PTR(INSN_DAT8(1))+X));    tmp = func(nes,a,b,P); NEXT_OPR(tmp); dest_reg = tmp&mask; }BREAK; \
     CASE(h8){ /*(d), y*/u8 a=A; u8 b=*(u8*)RMEM_PTR((*(u16*)ZERO_PAGE_PTR(INSN_DAT8(1)))+Y);    tmp = func(nes,a,b,P); NEXT_OPR(tmp); dest_reg = tmp&mask; }BREAK;
 
-INLINE int exnes_write(exnes_t*nes,i32 *state,u32 *write_addr_value,uint16_t addr,u8 value){
+INLINE int exnes_write(exnes_t*nes,u32 *state,u32 *write_addr_value,uint16_t addr,u8 value){
     exnes_t *cpu = nes;
     *state |= (addr>=0x2000&&addr<0x4020)?CPU_STATE_IO:0;
     #if _DEBUG_
@@ -610,6 +610,7 @@ INLINE int exnes_write(exnes_t*nes,i32 *state,u32 *write_addr_value,uint16_t add
     #endif
     *write_addr_value = (addr<<16) | value;
     *(u8*)(MEM_PTR(addr)) = value;
+    return 0;
 }
 
 INLINE int exnes_exec(exnes_t*nes){
@@ -1039,6 +1040,7 @@ INLINE int exnes_exec(exnes_t*nes){
     }
 
     SAVE_FAST_REG(cpu);
+    return 0;
 }
 
 INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
@@ -1127,13 +1129,13 @@ INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
     nes->input_ptr = &nes->apu[0x16];
 
     //初始化调色板
-    for(i=0;i<sizeof(nes->pal);i++){
+    for(i=0;i<sizeof(nes->pal)/sizeof(nes->pal[0]);i++){
         /*颜色需要放大2倍*/
         int r = (nes_pal[i]>>8)&0x7;
         int g = (nes_pal[i]>>4)&0x7;
         int b = (nes_pal[i]>>0)&0x7;
         r*=4;g*=4;b*=4;
-        nes->pal[i] = (r<<0)|(g<<5)|(b<<10);
+        nes->pal[i] = ((r<<EXNES_PAL_R_SHIFT)|(g<<EXNES_PAL_G_SHIFT)|(b<<EXNES_PAL_B_SHIFT)) & 0xffff;
     }
 
     nes->screen_width = 256;
@@ -1171,6 +1173,24 @@ INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
         t |= (i&(1<<6))?1<<0xc:0;
         t |= (i&(1<<7))?1<<0xe:0;
         nes->tileTable[i]=t;
+    }
+
+    return 0;
+}
+
+INLINE void exnes_pal_update(exnes_t*nes){
+    int i;
+    for(i=0;i<sizeof(nes->pal)/sizeof(nes->pal[0]);i++){
+        /*颜色需要放大2倍*/
+        int r = (nes_pal[i]>>8)&0x7;
+        int g = (nes_pal[i]>>4)&0x7;
+        int b = (nes_pal[i]>>0)&0x7;
+        r*=4;g*=4;b*=4;
+        nes->pal[i] = ((r<<EXNES_PAL_R_SHIFT)|(g<<EXNES_PAL_G_SHIFT)|(b<<EXNES_PAL_B_SHIFT)) & 0xffff;
+        if(nes->pal_isbigendian){
+            //大端序
+            nes->pal[i] = (((nes->pal[i]&0xff)<<8)|(nes->pal[i]>>8)) & 0xffff;
+        }
     }
 }
 
