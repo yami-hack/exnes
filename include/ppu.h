@@ -30,8 +30,6 @@ INLINE u8 _get_map(exnes_t*nes,int x,int y){
         map_idx = ~map_idx&1;
     }
     u8 *map = PPU_MEM_PTR(0x2000+map_idx*0x400);
-    u8 *map_att = map + 0x3c0;  /*一般在map结尾*/
-
 
     x &= 0xff;
     y &= 0xff;
@@ -62,7 +60,6 @@ INLINE void exnes_video_setmode(exnes_t*nes,int ispal){
 
 INLINE void exnes_ppu_render_name_table(exnes_t*nes,uint16_t *line_pixel,int line){
     u8 *bg_pal = PPU_MEM_PTR(0x3f00);
-    u8 *sprite_pal = PPU_MEM_PTR(0x3f10);
     //命名表
     //命名表的位置(应该使用map来命名)
 
@@ -145,7 +142,6 @@ INLINE void exnes_ppu_render(exnes_t*nes,uint16_t *line_pixel,int line){
         int hflip = (att>>6) & 1;
         int vflip = (att>>7) & 1;
         int hadd = hflip?1:-1;  /*水平翻转*/
-        int vadd = vflip?1:-1;
         u8 *curpal = PPU_MEM_PTR(0x3f10) + pal * 4;
 
         y -= line;

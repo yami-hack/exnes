@@ -29,6 +29,27 @@ typedef int32_t  i32;
 #define N6502_ZLG (1<<1)
 #define N6502_CLG (1<<0)
 
+/*优化性能*/
+#if defined(__GNUC__) || defined(__clang__)
+#ifndef likely
+#define likely(x)   __builtin_expect(!!(x),1)
+#define unlikely(x) __builtin_expect(!!(x),0)
+#endif
+#else
+#define likely(x) (x)
+#define unlikely(x) (x)
+#endif
+
+/*使用GCC跳转表*/
+#ifndef USE_GNUC_JUMP_TABLE
+#define USE_GNUC_JUMP_TABLE 0
+#endif
+
+/*内存访问使用函数表*/
+#ifndef USE_MEMMAP_FUNC
+#define USE_MEMMAP_FUNC 1
+#endif
+
 #ifdef _DEBUG_
 /*如果是调试模式,会被优化掉*/
 #define REGISTER
@@ -49,7 +70,7 @@ typedef int32_t  i32;
     REGISTER u16 PC = cpu->PC; \
     REGISTER u8 *sp_mem = cpu->ram+0x100; \
     /*register*/ u32 state = cpu->cpu_state; /*传地址的指令,不应该使用寄存器变量.但是是inline函数.应该可以传寄存器变量才是*/ \
-    /*register*/ u32 write_addr_value; /*高16位为地址,低16位为数据*/
+    /*register*/ u32 write_addr_value = 0; /*高16位为地址,低16位为数据*/
 
 #define SAVE_FAST_REG(cpu) \
     cpu->A = A;  \
@@ -94,7 +115,10 @@ enum{
     exnes_input_Right  = 1<<7,
 };
 
-struct exnes_t;
+
+
+typedef struct exnes_t exnes_t;
+typedef u8 *(*mem_func_t)(exnes_t*nes,u16 addr);
 typedef struct exnes_t{
     u8 A,X,Y;
     u8 P;
@@ -143,6 +167,11 @@ CPU时钟溢出
 
     u8  *rmem_map[0x10];
     u16 rmap_mask[0x10];
+
+#if USE_MEMMAP_FUNC
+    mem_func_t rmem_func[0x10];
+    mem_func_t wmem_func[0x10];
+#endif
 
     /*指向*/
     u8  *input_ptr;

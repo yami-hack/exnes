@@ -30,33 +30,41 @@
 #define _RMEM_PTR(OFF) \
     ((cpu->rmem_map[(OFF)>>0xc]) + RMEM_MASK(OFF))
 
+INLINE u8* _rmem_io_ptr(exnes_t*cpu,int addr){
+    if(unlikely(addr==0x2007)){
+        if(!cpu->ppu_read_flag){
+            /*第一次读取会读取到0*/
+            cpu->ppu_read_flag++;
+            return &cpu->error_mem[0];
+        }
+        exnes_t*nes = cpu;
+        u8 *ptr = PPU_MEM_PTR(cpu->ppu_write_addr);
+        cpu->ppu_write_addr++;
+        return ptr;
+    }
+    else if(unlikely(addr>=0x4016&&addr<=0x4019)){
+        u8 *iptr = &cpu->input[sizeof(cpu->input)-1];
+        if(cpu->input_state){
+        *iptr = (cpu->input[addr-0x4016]>>(cpu->input_state-1))&1;
+        cpu->input_state &= 0x7;        /*如果当前值是8,则变为0,+=1则为1*/
+        cpu->input_state += 1;
+        }
+        else{
+            *iptr = 0;
+        }
+        return iptr;
+    }
+    return _RMEM_PTR(addr);
+}
+
 INLINE u8* _rmem_ptr(exnes_t*cpu,int addr,u32 *state,u32 *read_dat){
-     *state |= (addr==0x2007)?CPU_STATE_PPURAM_READ:0;
-     *read_dat = addr;
-     if(addr==0x2007){
-         if(!cpu->ppu_read_flag){
-             /*第一次读取会读取到0*/
-             cpu->ppu_read_flag++;
-             return &cpu->error_mem[0];
-         }
-         exnes_t*nes = cpu;
-         u8 *ptr = PPU_MEM_PTR(cpu->ppu_write_addr);
-         cpu->ppu_write_addr++;
-         return ptr;
-     }
-     else if(addr>=0x4016&&addr<=0x4019){
-         u8 *iptr = &cpu->input[sizeof(cpu->input)-1];
-         if(cpu->input_state){
-            *iptr = (cpu->input[addr-0x4016]>>(cpu->input_state-1))&1;
-            cpu->input_state &= 0x7;        /*如果当前值是8,则变为0,+=1则为1*/
-            cpu->input_state += 1;
-         }
-         else{
-             *iptr = 0;
-         }
-         return iptr;
-     }
-     return _RMEM_PTR(addr);
+    #if USE_MEMMAP_FUNC
+    return cpu->rmem_func[addr>>0xc](cpu,addr);
+    #else
+    *state |= (addr==0x2007)?CPU_STATE_PPURAM_READ:0;
+    *read_dat = addr;
+    return _rmem_io_ptr(cpu,addr);
+    #endif
 }
 #define RMEM_PTR(OFF) \
     _rmem_ptr(cpu,OFF,&state,&write_addr_value)
@@ -118,8 +126,39 @@ INLINE u8* _rmem_ptr(exnes_t*cpu,int addr,u32 *state,u32 *read_dat){
 #define _OPC_INDEX_Y(REG,OPR) \
     REG = OPR(REG,*(u8*)RMEM_PTR((*(u16*)&ZERO_PAGE(INSN_OPR+0))+Y))
 
+#if USE_GNUC_JUMP_TABLE
+#define SETV(n)  [0x##n] = &&INSN0x##n
+#define SWITCH_INIT static const void*INSN_PTR[0x100] = { \
+        SETV(00),SETV(01),SETV(02),SETV(03),SETV(04),SETV(05),SETV(06),SETV(07),SETV(08),SETV(09),SETV(0a),SETV(0b),SETV(0c),SETV(0d),SETV(0e),SETV(0f), \
+        SETV(10),SETV(11),SETV(12),SETV(13),SETV(14),SETV(15),SETV(16),SETV(17),SETV(18),SETV(19),SETV(1a),SETV(1b),SETV(1c),SETV(1d),SETV(1e),SETV(1f), \
+        SETV(20),SETV(21),SETV(22),SETV(23),SETV(24),SETV(25),SETV(26),SETV(27),SETV(28),SETV(29),SETV(2a),SETV(2b),SETV(2c),SETV(2d),SETV(2e),SETV(2f), \
+        SETV(30),SETV(31),SETV(32),SETV(33),SETV(34),SETV(35),SETV(36),SETV(37),SETV(38),SETV(39),SETV(3a),SETV(3b),SETV(3c),SETV(3d),SETV(3e),SETV(3f), \
+        SETV(40),SETV(41),SETV(42),SETV(43),SETV(44),SETV(45),SETV(46),SETV(47),SETV(48),SETV(49),SETV(4a),SETV(4b),SETV(4c),SETV(4d),SETV(4e),SETV(4f), \
+        SETV(50),SETV(51),SETV(52),SETV(53),SETV(54),SETV(55),SETV(56),SETV(57),SETV(58),SETV(59),SETV(5a),SETV(5b),SETV(5c),SETV(5d),SETV(5e),SETV(5f), \
+        SETV(60),SETV(61),SETV(62),SETV(63),SETV(64),SETV(65),SETV(66),SETV(67),SETV(68),SETV(69),SETV(6a),SETV(6b),SETV(6c),SETV(6d),SETV(6e),SETV(6f), \
+        SETV(70),SETV(71),SETV(72),SETV(73),SETV(74),SETV(75),SETV(76),SETV(77),SETV(78),SETV(79),SETV(7a),SETV(7b),SETV(7c),SETV(7d),SETV(7e),SETV(7f), \
+        SETV(80),SETV(81),SETV(82),SETV(83),SETV(84),SETV(85),SETV(86),SETV(87),SETV(88),SETV(89),SETV(8a),SETV(8b),SETV(8c),SETV(8d),SETV(8e),SETV(8f), \
+        SETV(90),SETV(91),SETV(92),SETV(93),SETV(94),SETV(95),SETV(96),SETV(97),SETV(98),SETV(99),SETV(9a),SETV(9b),SETV(9c),SETV(9d),SETV(9e),SETV(9f), \
+        SETV(a0),SETV(a1),SETV(a2),SETV(a3),SETV(a4),SETV(a5),SETV(a6),SETV(a7),SETV(a8),SETV(a9),SETV(aa),SETV(ab),SETV(ac),SETV(ad),SETV(ae),SETV(af), \
+        SETV(b0),SETV(b1),SETV(b2),SETV(b3),SETV(b4),SETV(b5),SETV(b6),SETV(b7),SETV(b8),SETV(b9),SETV(ba),SETV(bb),SETV(bc),SETV(bd),SETV(be),SETV(bf), \
+        SETV(c0),SETV(c1),SETV(c2),SETV(c3),SETV(c4),SETV(c5),SETV(c6),SETV(c7),SETV(c8),SETV(c9),SETV(ca),SETV(cb),SETV(cc),SETV(cd),SETV(ce),SETV(cf), \
+        SETV(d0),SETV(d1),SETV(d2),SETV(d3),SETV(d4),SETV(d5),SETV(d6),SETV(d7),SETV(d8),SETV(d9),SETV(da),SETV(db),SETV(dc),SETV(dd),SETV(de),SETV(df), \
+        SETV(e0),SETV(e1),SETV(e2),SETV(e3),SETV(e4),SETV(e5),SETV(e6),SETV(e7),SETV(e8),SETV(e9),SETV(ea),SETV(eb),SETV(ec),SETV(ed),SETV(ee),SETV(ef), \
+        SETV(f0),SETV(f1),SETV(f2),SETV(f3),SETV(f4),SETV(f5),SETV(f6),SETV(f7),SETV(f8),SETV(f9),SETV(fa),SETV(fb),SETV(fc),SETV(fd),SETV(fe),SETV(ff), \
+    };
+#define SWITCH(cond) goto *INSN_PTR[cond];
+#define CASE(v) INSN##v:
+#define BREAK goto INSN_END
+#define DEFAULT
+#define SWITCH_END INSN_END:{}
+#else
+#define SWITCH_INIT
+#define SWITCH(cond) switch(cond)
 #define CASE(v) case (v):
 #define BREAK break
+#define DEFAULT default:
+#define SWITCH_END
+#endif
 
 #define DEF_BASE1(name,OPR,DEST_REG,NEXT_OPR,h1,h2,h3,h4,h5,h6,h7,h8) \
     CASE(h1){ /*imm   */_OPC_IMM(DEST_REG,OPR);         NEXT_OPR; }BREAK; \
@@ -601,6 +640,12 @@ INLINE i32 _cmp_(exnes_t*nes,u8 a,u8 b,u32 p){
 
 INLINE int exnes_write(exnes_t*nes,u32 *state,u32 *write_addr_value,uint16_t addr,u8 value){
     exnes_t *cpu = nes;
+    #if USE_MEMMAP_FUNC
+        *(u8*)nes->wmem_func[addr>>0xc](nes,addr) = value;
+        *write_addr_value = (addr<<16) | value;
+        *state |= nes->cpu_state;
+        nes->cpu_state = 0;
+    #else
     *state |= (addr>=0x2000&&addr<0x4020)?CPU_STATE_IO:0;
     #if _DEBUG_
     if(addr>=0x2000&&addr<0x4020&&(nes->emu_state&EXNES_DEBUG_IO)){
@@ -610,6 +655,7 @@ INLINE int exnes_write(exnes_t*nes,u32 *state,u32 *write_addr_value,uint16_t add
     #endif
     *write_addr_value = (addr<<16) | value;
     *(u8*)(MEM_PTR(addr)) = value;
+    #endif
     return 0;
 }
 
@@ -619,6 +665,7 @@ INLINE int exnes_exec(exnes_t*nes){
     UPDATE_PC;
     UPDATE_SP;
     state |= CPU_STATE_SET_CYCLES_HBLANK;
+    SWITCH_INIT;
     while((nes->emu_state&EXNES_QUIT)==0){
         while(!(state&(CPU_STATE_CYCLES|CPU_STATE_IO|CPU_STATE_PPURAM_READ))){
             /*快速模拟6502*/
@@ -633,7 +680,7 @@ INLINE int exnes_exec(exnes_t*nes){
             nes->oldPc_set&=_OLDPC_LOG_MAX_-1;
             #endif
 
-            switch (opcode)
+            SWITCH (opcode)
             {
                 DEF_BASE_E1(adc,A,  0xff,_adc_,0x69,0x65,0x75,0x6d,0x7d,0x79,0x61,0x71,UPDATE_FLAGE_ZNCV)
                 DEF_BASE_E1(and,A,  0xff,_and_,0x29,0x25,0x35,0x2d,0x3d,0x39,0x21,0x31,UPDATE_FLAGE_ZN)
@@ -736,7 +783,7 @@ INLINE int exnes_exec(exnes_t*nes){
                 CASE(0x18){P &= ~N6502_CLG;}BREAK;
                 CASE(0xd8){P &= ~N6502_DLG;}BREAK;
                 CASE(0x58){P &= ~N6502_ILG;}BREAK;
-                CASE(0xB8){P &= ~N6502_VLG;}BREAK;
+                CASE(0xb8){P &= ~N6502_VLG;}BREAK;
                 CASE(0x38){P |= N6502_CLG;}BREAK;
                 CASE(0xf8){P |= N6502_DLG;}BREAK;
                 CASE(0x78){P |= N6502_ILG;}BREAK;
@@ -755,121 +802,122 @@ INLINE int exnes_exec(exnes_t*nes){
                 CASE(0x03){GOTO_ERROR;}BREAK;
                 CASE(0x04){GOTO_ERROR;}BREAK;
                 CASE(0x07){GOTO_ERROR;}BREAK;
-                CASE(0x0B){GOTO_ERROR;}BREAK;
-                CASE(0x0C){GOTO_ERROR;}BREAK;
-                CASE(0x0F){GOTO_ERROR;}BREAK;
+                CASE(0x0b){GOTO_ERROR;}BREAK;
+                CASE(0x0c){GOTO_ERROR;}BREAK;
+                CASE(0x0f){GOTO_ERROR;}BREAK;
 
                 CASE(0x12){GOTO_ERROR;}BREAK;
                 CASE(0x13){GOTO_ERROR;}BREAK;
                 CASE(0x14){GOTO_ERROR;}BREAK;
                 CASE(0x17){GOTO_ERROR;}BREAK;
-                CASE(0x1A){GOTO_ERROR;}BREAK;
-                CASE(0x1B){GOTO_ERROR;}BREAK;
-                CASE(0x1C){GOTO_ERROR;}BREAK;
-                CASE(0x1F){GOTO_ERROR;}BREAK;
+                CASE(0x1a){GOTO_ERROR;}BREAK;
+                CASE(0x1b){GOTO_ERROR;}BREAK;
+                CASE(0x1c){GOTO_ERROR;}BREAK;
+                CASE(0x1f){GOTO_ERROR;}BREAK;
 
                 CASE(0x22){GOTO_ERROR;}BREAK;
                 CASE(0x23){GOTO_ERROR;}BREAK;
                 CASE(0x27){GOTO_ERROR;}BREAK;
-                CASE(0x2B){GOTO_ERROR;}BREAK;
-                CASE(0x2F){GOTO_ERROR;}BREAK;
+                CASE(0x2b){GOTO_ERROR;}BREAK;
+                CASE(0x2f){GOTO_ERROR;}BREAK;
 
                 CASE(0x32){GOTO_ERROR;}BREAK;
                 CASE(0x33){GOTO_ERROR;}BREAK;
                 CASE(0x34){GOTO_ERROR;}BREAK;
                 CASE(0x37){GOTO_ERROR;}BREAK;
-                CASE(0x3A){GOTO_ERROR;}BREAK;
-                CASE(0x3B){GOTO_ERROR;}BREAK;
-                CASE(0x3C){GOTO_ERROR;}BREAK;
-                CASE(0x3F){GOTO_ERROR;}BREAK;
+                CASE(0x3a){GOTO_ERROR;}BREAK;
+                CASE(0x3b){GOTO_ERROR;}BREAK;
+                CASE(0x3c){GOTO_ERROR;}BREAK;
+                CASE(0x3f){GOTO_ERROR;}BREAK;
 
                 CASE(0x42){GOTO_ERROR;}BREAK;
                 CASE(0x43){GOTO_ERROR;}BREAK;
                 CASE(0x44){GOTO_ERROR;}BREAK;
                 CASE(0x47){GOTO_ERROR;}BREAK;
-                CASE(0x4B){GOTO_ERROR;}BREAK;
-                CASE(0x4F){GOTO_ERROR;}BREAK;
+                CASE(0x4b){GOTO_ERROR;}BREAK;
+                CASE(0x4f){GOTO_ERROR;}BREAK;
 
+                CASE(0x52){GOTO_ERROR;}BREAK;
                 CASE(0x53){GOTO_ERROR;}BREAK;
                 CASE(0x54){GOTO_ERROR;}BREAK;
                 CASE(0x57){GOTO_ERROR;}BREAK;
-                CASE(0x5A){GOTO_ERROR;}BREAK;
-                CASE(0x5B){GOTO_ERROR;}BREAK;
-                CASE(0x5C){GOTO_ERROR;}BREAK;
-                CASE(0x5F){GOTO_ERROR;}BREAK;
+                CASE(0x5a){GOTO_ERROR;}BREAK;
+                CASE(0x5b){GOTO_ERROR;}BREAK;
+                CASE(0x5c){GOTO_ERROR;}BREAK;
+                CASE(0x5f){GOTO_ERROR;}BREAK;
 
                 CASE(0x62){GOTO_ERROR;}BREAK;
                 CASE(0x63){GOTO_ERROR;}BREAK;
                 CASE(0x64){GOTO_ERROR;}BREAK;
                 CASE(0x67){GOTO_ERROR;}BREAK;
-                CASE(0x6B){GOTO_ERROR;}BREAK;
-                CASE(0x6F){GOTO_ERROR;}BREAK;
+                CASE(0x6b){GOTO_ERROR;}BREAK;
+                CASE(0x6f){GOTO_ERROR;}BREAK;
 
                 CASE(0x72){GOTO_ERROR;}BREAK;
                 CASE(0x73){GOTO_ERROR;}BREAK;
                 CASE(0x74){GOTO_ERROR;}BREAK;
                 CASE(0x77){GOTO_ERROR;}BREAK;
-                CASE(0x7A){GOTO_ERROR;}BREAK;
-                CASE(0x7B){GOTO_ERROR;}BREAK;
-                CASE(0x7C){GOTO_ERROR;}BREAK;
-                CASE(0x7F){GOTO_ERROR;}BREAK;
+                CASE(0x7a){GOTO_ERROR;}BREAK;
+                CASE(0x7b){GOTO_ERROR;}BREAK;
+                CASE(0x7c){GOTO_ERROR;}BREAK;
+                CASE(0x7f){GOTO_ERROR;}BREAK;
 
                 CASE(0x80){GOTO_ERROR;}BREAK;
                 CASE(0x82){GOTO_ERROR;}BREAK;
                 CASE(0x83){GOTO_ERROR;}BREAK;
                 CASE(0x87){GOTO_ERROR;}BREAK;
                 CASE(0x89){GOTO_ERROR;}BREAK;
-                CASE(0x8B){GOTO_ERROR;}BREAK;
-                CASE(0x8F){GOTO_ERROR;}BREAK;
+                CASE(0x8b){GOTO_ERROR;}BREAK;
+                CASE(0x8f){GOTO_ERROR;}BREAK;
 
                 CASE(0x92){GOTO_ERROR;}BREAK;
                 CASE(0x93){GOTO_ERROR;}BREAK;
                 CASE(0x97){GOTO_ERROR;}BREAK;
-                CASE(0x9B){GOTO_ERROR;}BREAK;
-                CASE(0x9C){GOTO_ERROR;}BREAK;
-                CASE(0x9E){GOTO_ERROR;}BREAK;
-                CASE(0x9F){GOTO_ERROR;}BREAK;
+                CASE(0x9b){GOTO_ERROR;}BREAK;
+                CASE(0x9c){GOTO_ERROR;}BREAK;
+                CASE(0x9e){GOTO_ERROR;}BREAK;
+                CASE(0x9f){GOTO_ERROR;}BREAK;
 
                 CASE(0xa3){GOTO_ERROR;}BREAK;
                 CASE(0xa7){GOTO_ERROR;}BREAK;
-                CASE(0xaB){GOTO_ERROR;}BREAK;
-                CASE(0xaF){GOTO_ERROR;}BREAK;
+                CASE(0xab){GOTO_ERROR;}BREAK;
+                CASE(0xaf){GOTO_ERROR;}BREAK;
 
                 CASE(0xb2){GOTO_ERROR;}BREAK;
                 CASE(0xb3){GOTO_ERROR;}BREAK;
                 CASE(0xb7){GOTO_ERROR;}BREAK;
-                CASE(0xbB){GOTO_ERROR;}BREAK;
-                CASE(0xbF){GOTO_ERROR;}BREAK;
+                CASE(0xbb){GOTO_ERROR;}BREAK;
+                CASE(0xbf){GOTO_ERROR;}BREAK;
 
                 CASE(0xc2){GOTO_ERROR;}BREAK;
                 CASE(0xc3){GOTO_ERROR;}BREAK;
                 CASE(0xc7){GOTO_ERROR;}BREAK;
-                CASE(0xcB){GOTO_ERROR;}BREAK;
-                CASE(0xcF){GOTO_ERROR;}BREAK;
+                CASE(0xcb){GOTO_ERROR;}BREAK;
+                CASE(0xcf){GOTO_ERROR;}BREAK;
 
                 CASE(0xd2){GOTO_ERROR;}BREAK;
                 CASE(0xd3){GOTO_ERROR;}BREAK;
                 CASE(0xd4){GOTO_ERROR;}BREAK;
                 CASE(0xd7){GOTO_ERROR;}BREAK;
-                CASE(0xdA){GOTO_ERROR;}BREAK;
-                CASE(0xdB){GOTO_ERROR;}BREAK;
-                CASE(0xdC){GOTO_ERROR;}BREAK;
-                CASE(0xdF){GOTO_ERROR;}BREAK;
+                CASE(0xda){GOTO_ERROR;}BREAK;
+                CASE(0xdb){GOTO_ERROR;}BREAK;
+                CASE(0xdc){GOTO_ERROR;}BREAK;
+                CASE(0xdf){GOTO_ERROR;}BREAK;
 
                 CASE(0xe2){GOTO_ERROR;}BREAK;
                 CASE(0xe3){GOTO_ERROR;}BREAK;
                 CASE(0xe7){GOTO_ERROR;}BREAK;
-                CASE(0xeB){GOTO_ERROR;}BREAK;
-                CASE(0xeF){GOTO_ERROR;}BREAK;
+                CASE(0xeb){GOTO_ERROR;}BREAK;
+                CASE(0xef){GOTO_ERROR;}BREAK;
 
                 CASE(0xf2){GOTO_ERROR;}BREAK;
                 CASE(0xf3){GOTO_ERROR;}BREAK;
                 CASE(0xf4){GOTO_ERROR;}BREAK;
                 CASE(0xf7){GOTO_ERROR;}BREAK;
-                CASE(0xfA){GOTO_ERROR;}BREAK;
-                CASE(0xfB){GOTO_ERROR;}BREAK;
-                CASE(0xfC){GOTO_ERROR;}BREAK;
-                CASE(0xfF){GOTO_ERROR;}BREAK;
+                CASE(0xfa){GOTO_ERROR;}BREAK;
+                CASE(0xfb){GOTO_ERROR;}BREAK;
+                CASE(0xfc){GOTO_ERROR;}BREAK;
+                CASE(0xff){GOTO_ERROR;}BREAK;
 
                 CASE(0x00){
                     if(P&N6502_ILG){
@@ -881,12 +929,13 @@ INLINE int exnes_exec(exnes_t*nes){
                         PC=*(u16*)RMEM_PTR(0xfffe);UPDATE_PC;
                     }
                     }BREAK;
-            default:
+            DEFAULT
                 ERROR_LABEL:
                 EXNES_ERRORF(nes,"error insn:%04X-%02X\n",PC,opcode);
                 exit(-1);
-                break;
+                BREAK;
             }
+            SWITCH_END;
             PC += insn_len;
             nes->cur_insn += insn_len;
         }
@@ -1043,6 +1092,44 @@ INLINE int exnes_exec(exnes_t*nes){
     return 0;
 }
 
+INLINE u8* _exnes_rmem_0000(exnes_t*nes,u16 addr){
+    return &nes->ram[addr&0x7ff];
+}
+
+INLINE u8* _exnes_rmem_2000(exnes_t*nes,u16 addr){
+    /*读取IO*/
+    return _rmem_io_ptr(nes,addr);
+}
+
+INLINE u8* _exnes_rmem_4000(exnes_t*nes,u16 addr){
+    /*读取IO*/
+    return &nes->error_mem[0];
+}
+
+INLINE u8* _exnes_wmem_0000(exnes_t*nes,u16 addr){
+    /*写入IO*/
+    return &nes->ram[addr&0x7ff];
+}
+
+INLINE u8* _exnes_wmem_2000(exnes_t*nes,u16 addr){
+    /*写入IO*/
+    exnes_t*cpu = nes;
+    nes->cpu_state |= CPU_STATE_IO;
+    return (MEM_PTR(addr));
+}
+
+INLINE u8* _exnes_rmem_other(exnes_t*nes,u16 addr){
+    /*读取R0M*/
+    int idx = addr>>0xc;
+    return nes->rmem_map[addr>>0xc] + (0xfff&addr);
+}
+
+INLINE u8* _exnes_wmem_other(exnes_t*nes,u16 addr){
+    /*写入指令*/
+    int idx = addr>>0xc;
+    return nes->mem_map[addr>>0xc] + (0xfff&addr);
+}
+
 INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
     /*初始化*/
     exnes_t *cpu = nes;
@@ -1174,6 +1261,45 @@ INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
         t |= (i&(1<<7))?1<<0xe:0;
         nes->tileTable[i]=t;
     }
+
+    #if USE_MEMMAP_FUNC
+    /*初始化读写函数指针*/
+    nes->rmem_func[0x0] = _exnes_rmem_0000;
+    nes->rmem_func[0x1] = _exnes_rmem_0000;
+    nes->rmem_func[0x2] = _exnes_rmem_2000;
+    nes->rmem_func[0x3] = _exnes_rmem_2000;
+    nes->rmem_func[0x4] = _exnes_rmem_2000;
+    nes->rmem_func[0x5] = _exnes_rmem_2000;
+
+    nes->rmem_func[0x6] = _exnes_rmem_other; //一般为sram
+    nes->rmem_func[0x7] = _exnes_rmem_other;
+    nes->rmem_func[0x8] = _exnes_rmem_other; //rom
+    nes->rmem_func[0x9] = _exnes_rmem_other;
+    nes->rmem_func[0xa] = _exnes_rmem_other;
+    nes->rmem_func[0xb] = _exnes_rmem_other;
+    nes->rmem_func[0xc] = _exnes_rmem_other;
+    nes->rmem_func[0xd] = _exnes_rmem_other;
+    nes->rmem_func[0xe] = _exnes_rmem_other;
+    nes->rmem_func[0xf] = _exnes_rmem_other;
+
+    nes->wmem_func[0x0] = _exnes_wmem_0000;
+    nes->wmem_func[0x1] = _exnes_wmem_0000;
+    nes->wmem_func[0x2] = _exnes_wmem_2000;
+    nes->wmem_func[0x3] = _exnes_wmem_2000;
+    nes->wmem_func[0x4] = _exnes_wmem_2000;
+    nes->wmem_func[0x5] = _exnes_wmem_2000;
+
+    nes->wmem_func[0x6] = _exnes_wmem_other; //一般为sram
+    nes->wmem_func[0x7] = _exnes_wmem_other;
+    nes->wmem_func[0x8] = _exnes_wmem_other; //rom
+    nes->wmem_func[0x9] = _exnes_wmem_other;
+    nes->wmem_func[0xa] = _exnes_wmem_other;
+    nes->wmem_func[0xb] = _exnes_wmem_other;
+    nes->wmem_func[0xc] = _exnes_wmem_other;
+    nes->wmem_func[0xd] = _exnes_wmem_other;
+    nes->wmem_func[0xe] = _exnes_wmem_other;
+    nes->wmem_func[0xf] = _exnes_wmem_other;
+    #endif
 
     return 0;
 }
