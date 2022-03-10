@@ -4,6 +4,7 @@
 #include <exnes.h>
 #include <cpu6502.h>
 #include <ppu.h>
+#include <mapper.h>
 /*
 gcc  sdl2.c -lSDL2 -I../include -D _DEBUG_ -g -o exnes.exe
 */
@@ -54,10 +55,15 @@ static int render(exnes_t*nes){
     SDL_Rect rect;
     memcpy(&rect,&win.screen_rect,sizeof(rect));
     rect.x = 0;rect.y = 0;
+    SDL_Rect dest;
+    dest.x = 0;
+    dest.y = 0;
+    dest.w = 256*2;
+    dest.h = 240*2;
 
     /*更新数据*/
     SDL_UpdateTexture(win.screen,&rect,win.screen_data,2*rect.w);
-    SDL_RenderCopy(win.renderer,win.screen,0,&win.screen_rect);
+    SDL_RenderCopy(win.renderer,win.screen,0,&dest);
     SDL_RenderPresent(win.renderer);
     return 0;
 }
@@ -89,10 +95,13 @@ void init_nes(){
         exnes_t *nes = &raw_nes;
         memset(nes,0,sizeof(*nes));
         exnes_init_rom(nes,data);
+        exnes_mapper_init(nes);
         nes->render = render;
         nes->get_pixels_line = get_pixels_line;
         nes->err_data = stderr;
         nes->errorf = (void*)fprintf;
+        nes->out_data = stdout;
+        nes->outf = (void*)fprintf;
         nes->process_other = process_other;
         exnes_exec(nes);
     }

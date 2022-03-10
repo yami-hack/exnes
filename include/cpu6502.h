@@ -31,7 +31,10 @@
     ((cpu->rmem_map[(OFF)>>0xc]) + RMEM_MASK(OFF))
 
 INLINE u8* _rmem_io_ptr(exnes_t*cpu,int addr){
-    if(unlikely(addr==0x2007)){
+    if(unlikely(addr==0x2004)){
+        return cpu->oam[cpu->oam_addr];
+    }
+    else if(unlikely(addr==0x2007)){
         if(!cpu->ppu_read_flag){
             /*第一次读取会读取到0*/
             cpu->ppu_read_flag++;
@@ -39,18 +42,32 @@ INLINE u8* _rmem_io_ptr(exnes_t*cpu,int addr){
         }
         exnes_t*nes = cpu;
         u8 *ptr = PPU_MEM_PTR(cpu->ppu_write_addr);
+        if(nes->ppu_write_addr>=0x2000&&nes->ppu_write_addr<0x3f00){
+            u16 addr = nes->ppu_write_addr&0x7ff;
+            ptr = nes->nametable_ram + addr;
+        }
+        else if(nes->ppu_write_addr>=0x3f00&&nes->ppu_write_addr<0x4000){
+            ptr = nes->pal_ram + (nes->ppu_write_addr&0x1f);
+        }
         cpu->ppu_write_addr++;
         return ptr;
     }
+    else if(unlikely(addr==0x2002)){
+        cpu->temp_mem[0] = cpu->rppu[2];
+        ((exnes_ppu2002_t*)&cpu->rppu[2])->vblank_flg = 0;
+        return cpu->temp_mem;
+    }
     else if(unlikely(addr>=0x4016&&addr<=0x4019)){
         u8 *iptr = &cpu->input[sizeof(cpu->input)-1];
-        if(cpu->input_state){
-        *iptr = (cpu->input[addr-0x4016]>>(cpu->input_state-1))&1;
-        cpu->input_state &= 0x7;        /*如果当前值是8,则变为0,+=1则为1*/
-        cpu->input_state += 1;
+        if(cpu->input_state[addr&1]){
+            *iptr = (cpu->input[addr-0x4016]>>(cpu->input_state[addr&1]-1))&1;
+            cpu->input_state[addr&1 /*1p还是2p*/] &= 0x7;        /*如果当前值是8,则变为0,+=1则为1*/
+            cpu->input_state[addr&1 /*1p还是2p*/] += 1;
+            //*iptr |= 0x3<<3;            /*标准控制器的设置*/
+            *iptr |= 0x3<<5;
         }
         else{
-            *iptr = 0;
+            *iptr = cpu->input[addr-0x4016];
         }
         return iptr;
     }
@@ -299,9 +316,6 @@ dec abs,x
 
 #define POP() \
     (sp_mem[++SP])
-
-#define POP_dest(dest) \
-    /*cpu->sp_ptr++; SP++ dest = *cpu->sp_ptr;*/
 
 /*
 
@@ -641,7 +655,7 @@ INLINE i32 _cmp_(exnes_t*nes,u8 a,u8 b,u32 p){
 INLINE int exnes_write(exnes_t*nes,u32 *state,u32 *write_addr_value,uint16_t addr,u8 value){
     exnes_t *cpu = nes;
     #if USE_MEMMAP_FUNC
-        *(u8*)nes->wmem_func[addr>>0xc](nes,addr) = value;
+        nes->wmem_func[addr>>0xc](nes,addr,value);
         *write_addr_value = (addr<<16) | value;
         *state |= nes->cpu_state;
         nes->cpu_state = 0;
@@ -954,11 +968,47 @@ INLINE int exnes_exec(exnes_t*nes){
                     nes->ppu_read_flag = 0;
                 }
                 nes->ppu_write_addr_flg++;
+                /*
+                写入时会覆盖SCROLL
+                    实际上,他们会共用15bit t寄存器
+
+                    SCROLL寄存器应该放在比PPUADDR写入之后,vblank结束之前
+                    参考wiki.nesdev.org 的PPU scrolling条目中的Summary子条目
+
+                    PPU读取SCROLL应该是在渲染开始时读取.
+                */
+                nes->PPUSCROLL[0] = 0;
+                nes->PPUSCROLL[1] = 0;
+                nes->PPUSCROLL_state = 0;
+                /*当再次写入PPUSCROLL时,name_tab_addr会被重置*/
+                ((exnes_ppu2000_t*)&nes->ppu[0])->name_tab_addr = 0;
             }
             else if(addr==0x2007){
                 /*一般需要往0x2006写入两个数据,第一次写入为1,第二次写入为0*/
                 u16 addr = nes->ppu_write_addr;
-                nes->vram[addr&0x3fff] = value;
+                if(addr>=0x2000&&addr<0x3eff){
+                    if(!nes->rom_header->vmirror){
+                        //垂直镜像
+                        addr = ((addr&0x800)>>1)|(addr&0x3ff);
+                    }
+                    else{
+                        //水平镜像
+                        addr = addr & 0x7ff;
+                    }
+                    nes->nametable_ram[addr] = value;
+                }
+                else if(addr>=0x3f00&&addr<0x4000){
+                    addr &= 0x1f;
+                    if(addr==0x10){
+                        //会覆盖bg调色板0
+                        addr = 0;
+                    }
+                    nes->pal_ram[addr] = value;
+                }
+                else{
+                    //写
+                    *PPU_MEM_PTR(nes->ppu_write_addr) = value;
+                }
                 exnes_ppu2000_t*_2000 = (exnes_ppu2000_t*)&nes->ppu[0];
                 nes->ppu_write_addr += 1<<(_2000->_2007_inc_32*5);  //32的增长
             }
@@ -1006,11 +1056,11 @@ INLINE int exnes_exec(exnes_t*nes){
             else if(addr==0x4016){
                 /*输入时只能写这个寄存器*/
                 if((value&1)==1){
-                    nes->input_state = 1;
+                    nes->input_state[0] = nes->input_state[1] = 0;
                 }
                 else{
                     /*重置位置?*/
-                    nes->input_state = 1;
+                    nes->input_state[0] = nes->input_state[1] = 1;
                 }
             }
         }
@@ -1057,18 +1107,25 @@ INLINE int exnes_exec(exnes_t*nes){
                     PC = *(u16*)RMEM_PTR(0xfffa);
                     UPDATE_PC;
                 }
+                nes->PPUSCROLL[0] = 0;
+                nes->PPUSCROLL[1] = 0;
+                nes->PPUSCROLL_state = 0;
                 if(nes->render){
                     nes->render(nes);
                 }
             }
 
             if(nes->scanline==240){
-                /*垂直状态开始时,应该设置为0*/
-                nes->oam_addr = 0;
+                if(
+                    ((exnes_ppu2001_t*)&nes->ppu[0])->bg_display
+                ){
+                    /*垂直状态开始时,应该设置为0*/
+                    nes->oam_addr = 0;
 
-                /*应该初始化*/
-                nes->ppu_write_addr_flg = 0;
-                nes->ppu_write_addr = 0;
+                    /*应该初始化*/
+                    nes->ppu_write_addr_flg = 0;
+                    nes->ppu_write_addr = 0;
+                }
             }
 
             if(nes->scanline>=240){
@@ -1106,16 +1163,17 @@ INLINE u8* _exnes_rmem_4000(exnes_t*nes,u16 addr){
     return &nes->error_mem[0];
 }
 
-INLINE u8* _exnes_wmem_0000(exnes_t*nes,u16 addr){
+INLINE void _exnes_wmem_0000(exnes_t*nes,u16 addr,u8 val){
     /*写入IO*/
-    return &nes->ram[addr&0x7ff];
+    nes->ram[addr&0x7ff] = val;
 }
 
-INLINE u8* _exnes_wmem_2000(exnes_t*nes,u16 addr){
+INLINE void _exnes_wmem_2000(exnes_t*nes,u16 addr,u8 val){
     /*写入IO*/
     exnes_t*cpu = nes;
     nes->cpu_state |= CPU_STATE_IO;
-    return (MEM_PTR(addr));
+    //return (MEM_PTR(addr));
+    *(MEM_PTR(addr)) = val;
 }
 
 INLINE u8* _exnes_rmem_other(exnes_t*nes,u16 addr){
@@ -1124,11 +1182,13 @@ INLINE u8* _exnes_rmem_other(exnes_t*nes,u16 addr){
     return nes->rmem_map[addr>>0xc] + (0xfff&addr);
 }
 
-INLINE u8* _exnes_wmem_other(exnes_t*nes,u16 addr){
+INLINE void _exnes_wmem_other(exnes_t*nes,u16 addr,u8 val){
     /*写入指令*/
     int idx = addr>>0xc;
-    return nes->mem_map[addr>>0xc] + (0xfff&addr);
+    *(nes->mem_map[idx] + (0xfff&addr)) = val;
 }
+
+INLINE void _exnes_wmem_rom(exnes_t*nes,u16 addr,u8 val){}; //应该什么都不做
 
 INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
     /*初始化*/
@@ -1155,6 +1215,8 @@ INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
             nes->ram[i] = 0x00;
         }
     }
+    nes->rom_header = (exnes_rom_header_t*)rom;
+    nes->rom_bin = rom + 0x10;
 
     //映射ram,区域以2KB作为镜像
     nes->mem_map[MMAP(0x0000)] = &nes->ram[0];
@@ -1169,10 +1231,7 @@ INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
     /*PPU,读取,写入时另起命令*/
     nes->rmem_map [MMAP(0x2000)] = &nes->rppu[0];
     nes->rmap_mask[MMAP(0x2000)] = 0xf;
-    nes->ppu_mmap[MMAP(0x0000)] = &nes->vram[0x0000];
-    nes->ppu_mmap[MMAP(0x1000)] = &nes->vram[0x1000];
-    nes->ppu_mmap[MMAP(0x2000)] = &nes->vram[0x2000];
-    nes->ppu_mmap[MMAP(0x3000)] = &nes->vram[0x3000];
+    nes->ppu_mmap[MMAP(0x2000)] = &nes->nametable_ram;
     //存档
     nes->mem_map  [MMAP(0x6000)] = &nes->sram[0];
     nes->mem_map  [MMAP(0x7000)] = &nes->sram[0x1000];
@@ -1189,26 +1248,21 @@ INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
 
     /*处理ROM nes文件头0x10*/
     const u8* rom_bin = rom + 0x10;
-    //mario测试
-    nes->rmem_map [MMAP(0x8000)] = (u8*)rom_bin + (0 + 0) * 0x1000;
-    nes->rmem_map [MMAP(0x9000)] = (u8*)rom_bin + (0 + 1) * 0x1000;
-    nes->rmem_map [MMAP(0xa000)] = (u8*)rom_bin + (0 + 2) * 0x1000;
-    nes->rmem_map [MMAP(0xb000)] = (u8*)rom_bin + (0 + 3) * 0x1000;
-    nes->rmem_map [MMAP(0xc000)] = (u8*)rom_bin + (4 + 0) * 0x1000;
-    nes->rmem_map [MMAP(0xd000)] = (u8*)rom_bin + (4 + 1) * 0x1000;
-    nes->rmem_map [MMAP(0xe000)] = (u8*)rom_bin + (4 + 2) * 0x1000;
-    nes->rmem_map [MMAP(0xf000)] = (u8*)rom_bin + (4 + 3) * 0x1000;
-    nes->rmap_mask[MMAP(0x8000)] = 0xfff;
-    nes->rmap_mask[MMAP(0x9000)] = 0xfff;
-    nes->rmap_mask[MMAP(0xa000)] = 0xfff;
-    nes->rmap_mask[MMAP(0xb000)] = 0xfff;
-    nes->rmap_mask[MMAP(0xc000)] = 0xfff;
-    nes->rmap_mask[MMAP(0xd000)] = 0xfff;
-    nes->rmap_mask[MMAP(0xe000)] = 0xfff;
-    nes->rmap_mask[MMAP(0xf000)] = 0xfff;
-
-    nes->ppu_mmap[MMAP(0x0000)] = (u8*)rom_bin + 0x8000;
-    nes->ppu_mmap[MMAP(0x1000)] = (u8*)rom_bin + 0x9000;
+    int   addr = 0x8000;
+    if(nes->rom_header->PRG_page==1)
+        addr = 0xc000;      /*只有一页*/
+    while(addr<0x10000){
+        nes->rmem_map[MMAP(addr)] = (u8*)rom_bin;
+        nes->rmap_mask[MMAP(addr)] = 0xfff;
+        rom_bin += 0x1000;
+        addr += 0x1000;
+    }
+    rom_bin = nes->rom_bin + (nes->rom_header->PRG_page * 0x4000);
+    if(nes->rom_header->CHR_page!=0){
+        nes->ppu_mmap[MMAP(0x0000)] = (u8*)rom_bin;
+        rom_bin += 0x1000;
+        nes->ppu_mmap[MMAP(0x1000)] = (u8*)rom_bin;
+    }
 
     nes->rom = rom;
 
@@ -1266,39 +1320,20 @@ INLINE int exnes_init_rom(exnes_t*nes,const u8 *rom){
     /*初始化读写函数指针*/
     nes->rmem_func[0x0] = _exnes_rmem_0000;
     nes->rmem_func[0x1] = _exnes_rmem_0000;
-    nes->rmem_func[0x2] = _exnes_rmem_2000;
-    nes->rmem_func[0x3] = _exnes_rmem_2000;
-    nes->rmem_func[0x4] = _exnes_rmem_2000;
-    nes->rmem_func[0x5] = _exnes_rmem_2000;
+    for(i=2;i<=5;i++) nes->rmem_func[i] = _exnes_rmem_2000;
 
     nes->rmem_func[0x6] = _exnes_rmem_other; //一般为sram
     nes->rmem_func[0x7] = _exnes_rmem_other;
-    nes->rmem_func[0x8] = _exnes_rmem_other; //rom
-    nes->rmem_func[0x9] = _exnes_rmem_other;
-    nes->rmem_func[0xa] = _exnes_rmem_other;
-    nes->rmem_func[0xb] = _exnes_rmem_other;
-    nes->rmem_func[0xc] = _exnes_rmem_other;
-    nes->rmem_func[0xd] = _exnes_rmem_other;
-    nes->rmem_func[0xe] = _exnes_rmem_other;
-    nes->rmem_func[0xf] = _exnes_rmem_other;
+    for(i=0x8;i<0x10;i++) nes->rmem_func[i] = _exnes_rmem_other; //设置ROM
 
     nes->wmem_func[0x0] = _exnes_wmem_0000;
     nes->wmem_func[0x1] = _exnes_wmem_0000;
-    nes->wmem_func[0x2] = _exnes_wmem_2000;
-    nes->wmem_func[0x3] = _exnes_wmem_2000;
-    nes->wmem_func[0x4] = _exnes_wmem_2000;
-    nes->wmem_func[0x5] = _exnes_wmem_2000;
+    for(i=0x2;i<=0x5;i++) nes->wmem_func[i] = _exnes_wmem_2000; //设置读写寄存器
 
     nes->wmem_func[0x6] = _exnes_wmem_other; //一般为sram
     nes->wmem_func[0x7] = _exnes_wmem_other;
-    nes->wmem_func[0x8] = _exnes_wmem_other; //rom
-    nes->wmem_func[0x9] = _exnes_wmem_other;
-    nes->wmem_func[0xa] = _exnes_wmem_other;
-    nes->wmem_func[0xb] = _exnes_wmem_other;
-    nes->wmem_func[0xc] = _exnes_wmem_other;
-    nes->wmem_func[0xd] = _exnes_wmem_other;
-    nes->wmem_func[0xe] = _exnes_wmem_other;
-    nes->wmem_func[0xf] = _exnes_wmem_other;
+    /*设置ROM写函数,默认应该是不可写的*/
+    for(i=0x8;i<=0xf;i++) nes->wmem_func[i] = _exnes_wmem_rom;
     #endif
 
     return 0;

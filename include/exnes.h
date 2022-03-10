@@ -1,4 +1,3 @@
-
 #ifndef EXNES_H_
 #define EXNES_H_
 
@@ -7,7 +6,6 @@
 #ifndef PACKED
 #define PACKED __attribute__ ((packed))
 #endif
-
 
 #ifndef INLINE
 #define INLINE static inline
@@ -118,7 +116,8 @@ enum{
 
 
 typedef struct exnes_t exnes_t;
-typedef u8 *(*mem_func_t)(exnes_t*nes,u16 addr);
+typedef u8  *(*mem_func_t)(exnes_t*nes,u16 addr);
+typedef void (*mem_wfunc_t)(exnes_t*nes,u16 addr,u8 value);
 typedef struct exnes_t{
     u8 A,X,Y;
     u8 P;
@@ -139,9 +138,12 @@ CPU时钟溢出
 #define CPU_STATE_CYCLES_MASK   (((CPU_STATE_CYCLES<<1)-1))
 #define CPU_STATE_SET_CYCLES_HBLANK (CPU_STATE_CYCLES-(cpu->hblank_clock))
     u32 cpu_state;
+    struct exnes_rom_header_t *rom_header;
+    u8 *rom_bin;
 
     u8 ram[2*1024];
-    u8 vram[0x4000];
+    u8      nametable_ram[0x800];   //2KiB
+    u8      pal_ram[0x1f];          //调色板
     u8 oam[0x100];      //oam数据
     i8 oam_addr;        //一般为0
     /*卡带ram*/
@@ -157,9 +159,10 @@ CPU时钟溢出
 #endif
 #define PPU_MEM_PTR(OFF) \
     (nes->ppu_mmap[(OFF)>>0xc]+((OFF)&0xfff))
-    u8 *ppu_mmap[0x10];         //PPU的内存
+    u8  *ppu_mmap[0x10];        //PPU的内存
     const u8 *rom;              //可能是常量
     u8  error_mem[0x4];
+    u8  temp_mem[2];            //只是临时内存
 
     #define MMAP(addr) (addr>>0xc)
     u8  *mem_map[0x10];
@@ -170,7 +173,7 @@ CPU时钟溢出
 
 #if USE_MEMMAP_FUNC
     mem_func_t rmem_func[0x10];
-    mem_func_t wmem_func[0x10];
+    mem_wfunc_t wmem_func[0x10];
 #endif
 
     /*指向*/
@@ -203,7 +206,7 @@ CPU时钟溢出
     /*读取寄存器状态*/
     /*input[0xf]为内存返回值*/
     u8 input[0x10];
-    u8 input_state;
+    u8 input_state[2];  //2P
 
     //模拟器状态
 #define EXNES_QUIT      (1<<0)
@@ -218,8 +221,12 @@ CPU时钟溢出
 
 #define EXNES_ERRORF(nes,fmt,...) \
     if(nes->errorf)nes->errorf(nes->err_data,fmt,##__VA_ARGS__)
+#define EXNES_OUTF(nes,fmt,...) \
+    if(nes->outf)nes->outf(nes->out_data,fmt,##__VA_ARGS__)
     void* err_data;
     int (*errorf)(void*err_data,const char*fmt,...);
+    void* out_data;
+    int (*outf)(void*out_data,const char*fmt,...);
 }exnes_t;
 
 typedef struct PACKED{
@@ -248,20 +255,20 @@ typedef struct PACKED{
     u8 vblank_flg:1;        //是否处理垂直中断状态
 }exnes_ppu2002_t;
 
-typedef struct PACKED{
+typedef struct PACKED exnes_rom_header_t{
     u8 id[4];       //NES
     /*PRG:N*16K,CHR:N*8K*/
     u8 PRG_page;    // N*16K
     u8 CHR_page;    // N*8K
-    u8 mapper:4;
-    u8 _4screenVam:1;
-    u8 patch:1; //512训练器补丁?
-    u8 battery:1;   //存在sram设置
     u8 vmirror:1;   //0为水平镜像,1为垂直镜像
-    u8 mapper2:4;   //如过0Fh为0可以忽略
-    u8 zero:2;
-    u8 pc10:1;  //有关街机的ROM
+    u8 battery:1;   //存在sram设置
+    u8 patch:1; //512训练器补丁?
+    u8 _4screenVam:1;
+    u8 mapper:4;
     u8 vs:1;    //有关街机的ROM
+    u8 pc10:1;  //有关街机的ROM
+    u8 zero:2;
+    u8 mapper2:4;   //如过0Fh为0可以忽略
     u8 sram_num;        //sram数量数
     u8 zero2;   //09h
     u8 zero3;   //0ah
